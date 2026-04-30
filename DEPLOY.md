@@ -162,6 +162,17 @@ https://your-project-id.firebaseapp.com
 2. Render auto-redeploys (if connected via GitHub)
 3. Or manually redeploy from Render dashboard
 
+### Auto Deploy With GitHub Actions
+
+This repository includes GitHub Actions workflows for automatic deploys on pushes to `main`.
+
+1. Add a GitHub secret named `RENDER_DEPLOY_HOOK_URL` with your Render deploy hook URL.
+2. Add a GitHub secret named `FIREBASE_TOKEN` with a Firebase CLI token.
+3. Push to `main`.
+4. The backend workflow triggers Render and the frontend workflow deploys Firebase Hosting.
+
+If you prefer Render's built-in GitHub auto deploy, keep the service connected to the repo and leave the Render workflow disabled.
+
 ### Update Frontend
 ```bash
 # Edit code, then:
