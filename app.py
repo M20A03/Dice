@@ -13,8 +13,21 @@ import secrets
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # For session management
 
+FRONTEND_ORIGINS = os.getenv(
+    'FRONTEND_ORIGINS',
+    'https://dice-control-m.web.app,https://dice-control-m.firebaseapp.com,http://localhost:5173'
+).split(',')
+
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+
 # Enable CORS for frontend communication
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(
+    app,
+    resources={r"/api/*": {"origins": [origin.strip() for origin in FRONTEND_ORIGINS]}},
+    supports_credentials=True
+)
 
 # Optional: Load from .env if available (for deployment servers)
 from dotenv import load_dotenv
