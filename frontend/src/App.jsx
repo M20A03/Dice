@@ -19,7 +19,7 @@ function LoadingScreen() {
   )
 }
 
-function DeniedScreen({message}) {
+function DeniedScreen({message, deniedEmail}) {
   return (
     <div className="page-shell">
       <div className="orb orb-one" />
@@ -28,6 +28,7 @@ function DeniedScreen({message}) {
         <div className="denied-badge">Access locked</div>
         <h1>Firebase approval needed</h1>
         <p>{message}</p>
+        {deniedEmail && <p className="muted">Signed in as <strong>{deniedEmail}</strong></p>}
         <p className="muted">Ask the admin to add your email to Firestore collection <strong>approvedUsers</strong>.</p>
       </div>
     </div>
@@ -38,11 +39,13 @@ export default function App(){
   const [authState, setAuthState] = useState('loading')
   const [firebaseUser, setFirebaseUser] = useState(null)
   const [accessMessage, setAccessMessage] = useState(null)
+  const [deniedEmail, setDeniedEmail] = useState(null)
   const [checkingAccess, setCheckingAccess] = useState(false)
 
   useEffect(()=>{
     const unsubscribe = onAuthStateChanged(auth, async user => {
       setAccessMessage(null)
+      setDeniedEmail(null)
 
       if (!user) {
         setFirebaseUser(null)
@@ -54,6 +57,7 @@ export default function App(){
       try {
         const approved = await isApprovedFirebaseUser(user)
         if (!approved) {
+          setDeniedEmail((user.email || '').trim().toLowerCase())
           await signOut(auth)
           setFirebaseUser(null)
           setAuthState('denied')
@@ -64,6 +68,7 @@ export default function App(){
         setFirebaseUser(user)
         setAuthState('signed-in')
       } catch (error) {
+        setDeniedEmail((user.email || '').trim().toLowerCase())
         await signOut(auth)
         setFirebaseUser(null)
         setAuthState('denied')
@@ -78,6 +83,6 @@ export default function App(){
 
   if (authState === 'loading' || checkingAccess) return <LoadingScreen />
   if (authState === 'signed-out') return <Login />
-  if (authState === 'denied') return <DeniedScreen message={accessMessage} />
+  if (authState === 'denied') return <DeniedScreen message={accessMessage} deniedEmail={deniedEmail} />
   return <Dashboard firebaseUser={firebaseUser} />
 }

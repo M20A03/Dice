@@ -310,6 +310,30 @@ input:focus {
   color: var(--muted);
 }
 
+.credential-guide {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.credential-guide h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.credential-guide ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.credential-guide a {
+  color: #c4b5fd;
+}
+
 .metric-grid {
   margin-top: 24px;
   display: grid;

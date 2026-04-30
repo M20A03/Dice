@@ -9,6 +9,7 @@ const EMPTY_FORM = {
   apiHash: '',
   phone: '',
   groupLink: '',
+  otpCode: '',
 }
 
 export default function Dashboard({firebaseUser}){
@@ -19,6 +20,8 @@ export default function Dashboard({firebaseUser}){
   const [notice, setNotice] = useState(null)
   const [error, setError] = useState(null)
   const [savingTelegram, setSavingTelegram] = useState(false)
+  const [verifyingOtp, setVerifyingOtp] = useState(false)
+  const [otpSent, setOtpSent] = useState(false)
   const [busyAction, setBusyAction] = useState(null)
   const logsRef = useRef(null)
 
@@ -34,6 +37,7 @@ export default function Dashboard({firebaseUser}){
             phone: current.phone || String(data.credentials.phone || ''),
             groupLink: current.groupLink || String(data.credentials.group_link || ''),
           }))
+          setOtpSent(data.telegram_status === 'otp_pending')
         }
       } catch {
         setStatus(null)
@@ -75,13 +79,38 @@ export default function Dashboard({firebaseUser}){
           group_link: form.groupLink,
         })
       })
-      setNotice('Telegram credentials saved. You can start a run now.')
+      setOtpSent(true)
+      setNotice('Telegram credentials saved. Enter the OTP sent to Telegram to connect.')
       const refreshed = await apiFetch('/api/status')
       setStatus(refreshed)
     } catch (apiError) {
       setError(apiError?.message || 'Unable to save Telegram credentials.')
     } finally {
       setSavingTelegram(false)
+    }
+  }
+
+  async function verifyOtp(event){
+    event.preventDefault()
+    setVerifyingOtp(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      await apiFetch('/api/verify-otp', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ otp_code: form.otpCode })
+      })
+      setOtpSent(false)
+      setForm(current => ({ ...current, otpCode: '' }))
+      setNotice('Telegram OTP verified. You can start the run now.')
+      const refreshed = await apiFetch('/api/status')
+      setStatus(refreshed)
+    } catch (apiError) {
+      setError(apiError?.message || 'Unable to verify OTP.')
+    } finally {
+      setVerifyingOtp(false)
     }
   }
 
@@ -138,6 +167,7 @@ export default function Dashboard({firebaseUser}){
     {label: 'Status', value: status?.status || 'Idle'},
     {label: 'Attempts', value: status?.attempts || 0},
     {label: 'Dice', value: diceMeta.emoji},
+    {label: 'Telegram', value: status?.telegram_connected ? 'Connected' : 'OTP pending'},
     {label: 'Target', value: target},
   ]
 
@@ -223,6 +253,33 @@ export default function Dashboard({firebaseUser}){
             </button>
           </form>
 
+          <div className="credential-guide">
+            <h3>How to get Telegram API ID and API Hash</h3>
+            <ol>
+              <li>Open <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a> and sign in with your phone number.</li>
+              <li>Click <strong>API development tools</strong>.</li>
+              <li>Create a new app if Telegram asks for one.</li>
+              <li>Copy the <strong>api_id</strong> and <strong>api_hash</strong> into the fields above.</li>
+            </ol>
+          </div>
+
+          {otpSent && (
+            <form className="setup-form otp-form" onSubmit={verifyOtp}>
+              <label>
+                <span>Telegram OTP</span>
+                <input
+                  value={form.otpCode}
+                  onChange={event => setForm({...form, otpCode: event.target.value})}
+                  placeholder="12345"
+                />
+              </label>
+
+              <button className="primary-button" type="submit" disabled={verifyingOtp}>
+                {verifyingOtp ? 'Verifying...' : 'Verify OTP'}
+              </button>
+            </form>
+          )}
+
           {notice && <div className="success-banner">{notice}</div>}
           {error && <div className="error-banner">{error}</div>}
         </div>
@@ -230,7 +287,7 @@ export default function Dashboard({firebaseUser}){
         <div className="glass-panel dice-panel">
           <div className="card-title">
             <h2>Select dice</h2>
-            <p>Each emoji has its own range, so the target adjusts automatically.</p>
+            <p>Only the classic Telegram dice is enabled now.</p>
           </div>
 
           <div className="dice-grid">
@@ -272,8 +329,8 @@ export default function Dashboard({firebaseUser}){
 
       <section className="glass-panel logs-panel">
         <div className="card-title">
-          <h2>Activity log</h2>
-          <p>Follow every attempt in real time.</p>
+          <h2>Run history</h2>
+          <p>Follow every connection and attempt in real time.</p>
         </div>
         <div className="logs" ref={logsRef}>
           {status?.logs?.length ? status.logs.map((line, index)=>(<div key={index}>{line}</div>)) : <div className="empty-state">No logs yet. Start a run to see activity.</div>}

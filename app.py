@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from telethon import TelegramClient, errors
+from telethon.errors import SessionPasswordNeededError
 from telethon.tl.types import InputMediaDice
 import asyncio
 import threading
@@ -20,10 +21,6 @@ load_dotenv()
 
 ALLOWED_DICE = {
     '🎲': 6,
-    '🎯': 6,
-    '🏀': 5,
-    '⚽': 5,
-    '🎳': 6,
 }
 
 # State management - per user sessions
@@ -40,6 +37,8 @@ def get_user_state(user_id):
             'logs': [],
             'desired_number': 3,
             'credentials': None,
+            'telegram_connected': False,
+            'phone_code_hash': None,
             'client': None,
             'thread': None
         }
@@ -68,15 +67,28 @@ def add_log(user_id, message):
         user_state['logs'] = user_state['logs'][-100:]
     print(f"[{user_id}] {log_entry}")
 
-async def initialize_client(user_id, api_id, api_hash, phone):
+async def initialize_client(user_id, api_id, api_hash, phone, otp_code=None, phone_code_hash=None):
     """Initialize Telegram client for user"""
     user_state = get_user_state(user_id)
     try:
         client = TelegramClient(f'dice_session_{user_id}', api_id, api_hash)
-        await client.start(phone=phone)
+        await client.connect()
+
+        if otp_code:
+            await client.sign_in(phone=phone, code=otp_code, phone_code_hash=phone_code_hash)
+            user_state['telegram_connected'] = True
+            user_state['phone_code_hash'] = None
+            add_log(user_id, "✅ Connected to Telegram")
+        else:
+            sent_code = await client.send_code_request(phone)
+            user_state['phone_code_hash'] = sent_code.phone_code_hash
+            add_log(user_id, "📩 OTP sent to your Telegram number")
+
         user_state['client'] = client
-        add_log(user_id, "✅ Connected to Telegram")
         return client
+    except SessionPasswordNeededError:
+        add_log(user_id, "⚠️ Telegram requires a password for two-step verification")
+        return None
     except Exception as e:
         add_log(user_id, f"❌ Failed to connect: {e}")
         return None
@@ -168,7 +180,7 @@ def index():
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    """Save user credentials"""
+    """Save user credentials and request a Telegram OTP"""
     user_id = get_user_id()
     user_state = get_user_state(user_id)
     data = request.json
@@ -197,8 +209,82 @@ def login():
         'phone': phone,
         'group_link': group_link
     }
+
+    user_state['telegram_connected'] = False
+    user_state['phone_code_hash'] = None
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        temp_client = TelegramClient(f'dice_session_{user_id}', api_id, api_hash)
+        loop.run_until_complete(temp_client.connect())
+        sent_code = loop.run_until_complete(temp_client.send_code_request(phone))
+        user_state['phone_code_hash'] = sent_code.phone_code_hash
+        loop.run_until_complete(temp_client.disconnect())
+        add_log(user_id, "📩 OTP sent to your Telegram number")
+    except SessionPasswordNeededError:
+        user_state['phone_code_hash'] = None
+        add_log(user_id, "⚠️ Two-step verification is enabled for this account")
+    except Exception as e:
+        add_log(user_id, f"❌ Failed to send OTP: {e}")
+        return jsonify({'error': f'Credentials saved, but OTP could not be sent: {e}'}), 400
+    finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
     
-    return jsonify({'status': 'Credentials saved', 'user_id': user_id})
+    return jsonify({
+        'status': 'Credentials saved',
+        'otp_sent': True,
+        'telegram_connected': user_state['telegram_connected'],
+        'user_id': user_id
+    })
+
+@app.route('/api/verify-otp', methods=['POST'])
+def verify_otp():
+    """Verify the Telegram OTP and finish connecting the account"""
+    user_id = get_user_id()
+    user_state = get_user_state(user_id)
+
+    if not user_state['credentials']:
+        return jsonify({'error': 'Save Telegram credentials first'}), 401
+
+    data = request.json or {}
+    otp_code = str(data.get('otp_code', '')).strip()
+
+    if not otp_code:
+        return jsonify({'error': 'OTP code is required'}), 400
+
+    creds = user_state['credentials']
+    if not user_state.get('phone_code_hash'):
+        return jsonify({'error': 'OTP was not requested yet. Save credentials again to request a new code.'}), 400
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        client = TelegramClient(f'dice_session_{user_id}', creds['api_id'], creds['api_hash'])
+        loop.run_until_complete(client.connect())
+        loop.run_until_complete(client.sign_in(
+            phone=creds['phone'],
+            code=otp_code,
+            phone_code_hash=user_state['phone_code_hash']
+        ))
+        user_state['client'] = client
+        user_state['telegram_connected'] = True
+        user_state['phone_code_hash'] = None
+        add_log(user_id, "✅ Telegram OTP verified successfully")
+        return jsonify({'status': 'Telegram connected'})
+    except SessionPasswordNeededError:
+        return jsonify({'error': 'Two-step verification password is enabled. This app currently supports OTP only.'}), 400
+    except Exception as e:
+        add_log(user_id, f"❌ OTP verification failed: {e}")
+        return jsonify({'error': f'OTP verification failed: {e}'}), 400
+    finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
@@ -231,8 +317,15 @@ def get_status():
 
     if not user_state['credentials']:
         return jsonify({'error': 'Not logged in'}), 401
-    
-    return jsonify(user_state)
+
+    safe_state = {
+        key: value
+        for key, value in user_state.items()
+        if key not in {'client', 'thread'}
+    }
+    safe_state['telegram_connected'] = bool(user_state.get('telegram_connected'))
+    safe_state['telegram_status'] = 'connected' if user_state.get('telegram_connected') else 'otp_pending'
+    return jsonify(safe_state)
 
 @app.route('/api/start', methods=['POST'])
 def start_bot():
@@ -245,6 +338,9 @@ def start_bot():
     
     if user_state['running']:
         return jsonify({'error': 'Bot already running'}), 400
+
+    if not user_state.get('telegram_connected'):
+        return jsonify({'error': 'Telegram is not connected yet. Verify the OTP first.'}), 400
     
     data = request.json or {}
     desired_number = int(data.get('desired_number', 3))
@@ -268,15 +364,15 @@ def start_bot():
         
         try:
             creds = user_state['credentials']
-            # Initialize client
-            client = loop.run_until_complete(
-                initialize_client(
-                    user_id,
-                    creds['api_id'],
-                    creds['api_hash'],
-                    creds['phone']
-                )
-            )
+            client = user_state.get('client')
+
+            if not client:
+                client = TelegramClient(f'dice_session_{user_id}', creds['api_id'], creds['api_hash'])
+                loop.run_until_complete(client.connect())
+                if not loop.run_until_complete(client.is_user_authorized()):
+                    add_log(user_id, "❌ Telegram session is not authorized. Verify the OTP again.")
+                    return
+                user_state['client'] = client
             
             if not client:
                 add_log(user_id, "❌ Failed to connect to Telegram")
