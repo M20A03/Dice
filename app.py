@@ -5,6 +5,7 @@ from telethon.errors import SessionPasswordNeededError
 from telethon.tl.types import InputMediaDice
 import asyncio
 import threading
+import inspect
 import os
 from datetime import datetime
 import secrets
@@ -66,6 +67,33 @@ def add_log(user_id, message):
     if len(user_state['logs']) > 100:
         user_state['logs'] = user_state['logs'][-100:]
     print(f"[{user_id}] {log_entry}")
+
+async def _await_if_needed(result):
+    """Await Telethon calls that may be sync/async depending on runtime wrappers."""
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+async def _request_otp_async(user_id, api_id, api_hash, phone):
+    client = TelegramClient(f'dice_session_{user_id}', api_id, api_hash)
+    try:
+        await _await_if_needed(client.connect())
+        sent_code = await _await_if_needed(client.send_code_request(phone))
+        return sent_code.phone_code_hash
+    finally:
+        await _await_if_needed(client.disconnect())
+
+async def _verify_otp_async(user_id, api_id, api_hash, phone, otp_code, phone_code_hash):
+    client = TelegramClient(f'dice_session_{user_id}', api_id, api_hash)
+    try:
+        await _await_if_needed(client.connect())
+        await _await_if_needed(client.sign_in(
+            phone=phone,
+            code=otp_code,
+            phone_code_hash=phone_code_hash
+        ))
+    finally:
+        await _await_if_needed(client.disconnect())
 
 async def initialize_client(user_id, api_id, api_hash, phone, otp_code=None, phone_code_hash=None):
     """Initialize Telegram client for user"""
@@ -214,13 +242,12 @@ def login():
     user_state['phone_code_hash'] = None
 
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        temp_client = TelegramClient(f'dice_session_{user_id}', api_id, api_hash)
-        loop.run_until_complete(temp_client.connect())
-        sent_code = loop.run_until_complete(temp_client.send_code_request(phone))
-        user_state['phone_code_hash'] = sent_code.phone_code_hash
-        loop.run_until_complete(temp_client.disconnect())
+        user_state['phone_code_hash'] = asyncio.run(_request_otp_async(
+            user_id,
+            api_id,
+            api_hash,
+            phone
+        ))
         add_log(user_id, "📩 OTP sent to your Telegram number")
     except SessionPasswordNeededError:
         user_state['phone_code_hash'] = None
@@ -228,12 +255,7 @@ def login():
     except Exception as e:
         add_log(user_id, f"❌ Failed to send OTP: {e}")
         return jsonify({'error': f'Credentials saved, but OTP could not be sent: {e}'}), 400
-    finally:
-        try:
-            loop.close()
-        except Exception:
-            pass
-    
+
     return jsonify({
         'status': 'Credentials saved',
         'otp_sent': True,
@@ -261,16 +283,16 @@ def verify_otp():
         return jsonify({'error': 'OTP was not requested yet. Save credentials again to request a new code.'}), 400
 
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        client = TelegramClient(f'dice_session_{user_id}', creds['api_id'], creds['api_hash'])
-        loop.run_until_complete(client.connect())
-        loop.run_until_complete(client.sign_in(
-            phone=creds['phone'],
-            code=otp_code,
-            phone_code_hash=user_state['phone_code_hash']
+        asyncio.run(_verify_otp_async(
+            user_id,
+            creds['api_id'],
+            creds['api_hash'],
+            creds['phone'],
+            otp_code,
+            user_state['phone_code_hash']
         ))
-        user_state['client'] = client
+        # Keep this None here; start route creates a fresh client in its own loop/thread.
+        user_state['client'] = None
         user_state['telegram_connected'] = True
         user_state['phone_code_hash'] = None
         add_log(user_id, "✅ Telegram OTP verified successfully")
@@ -280,12 +302,6 @@ def verify_otp():
     except Exception as e:
         add_log(user_id, f"❌ OTP verification failed: {e}")
         return jsonify({'error': f'OTP verification failed: {e}'}), 400
-    finally:
-        try:
-            loop.close()
-        except Exception:
-            pass
-
 @app.route('/api/logout', methods=['POST'])
 def logout():
     """Clear user credentials"""
@@ -297,10 +313,9 @@ def logout():
         # Close client if exists
         if user_state['client']:
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(user_state['client'].disconnect())
-                loop.close()
+                disconnect_result = user_state['client'].disconnect()
+                if inspect.isawaitable(disconnect_result):
+                    asyncio.run(disconnect_result)
             except:
                 pass
         # Clear credentials

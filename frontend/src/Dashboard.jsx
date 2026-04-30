@@ -55,6 +55,7 @@ export default function Dashboard({firebaseUser}){
 
   const diceMeta = useMemo(() => getDiceOption(selectedDice), [selectedDice])
   const targetOptions = useMemo(() => Array.from({length: diceMeta.max}, (_, index) => index + 1), [diceMeta.max])
+  const showOtpForm = otpSent || Boolean(status?.credentials && !status?.telegram_connected)
 
   useEffect(()=>{
     if (target > diceMeta.max) {
@@ -85,6 +86,12 @@ export default function Dashboard({firebaseUser}){
       setStatus(refreshed)
     } catch (apiError) {
       setError(apiError?.message || 'Unable to save Telegram credentials.')
+      try {
+        const refreshed = await apiFetch('/api/status')
+        setStatus(refreshed)
+      } catch {
+        // Keep current status when status refresh fails.
+      }
     } finally {
       setSavingTelegram(false)
     }
@@ -263,7 +270,7 @@ export default function Dashboard({firebaseUser}){
             </ol>
           </div>
 
-          {otpSent && (
+          {showOtpForm && (
             <form className="setup-form otp-form" onSubmit={verifyOtp}>
               <label>
                 <span>Telegram OTP</span>
