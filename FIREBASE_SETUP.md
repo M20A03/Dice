@@ -1,13 +1,13 @@
 # Firebase Setup Guide
 
-This app integrates Firebase for authentication, Firestore database, and analytics.
+This app uses Firebase Authentication for sign-in and Firestore as an allowlist for approved users.
 
 ## Step 1: Create a Firebase Project
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Click "Create a project"
 3. Follow the setup wizard
-4. Enable Google Analytics (optional but recommended)
+4. Enable Google Analytics only if you want analytics
 
 ## Step 2: Get Your Firebase Configuration
 
@@ -45,20 +45,32 @@ This app integrates Firebase for authentication, Firestore database, and analyti
    VITE_API_BASE_URL=http://localhost:5000
    ```
 
-## Step 4: Install Dependencies
+## Step 4: Create Approved Users
+
+1. In Firebase Console open **Firestore Database**.
+2. Create a collection named `approvedUsers`.
+3. Add a document for each allowed user.
+4. Use the user email as the document id, or add an `email` field.
+5. Optional fields:
+   - `enabled: true`
+   - `name: "User Name"`
+
+The frontend checks this allowlist after Firebase sign-in and signs out unapproved users automatically.
+
+## Step 5: Install Dependencies
 
 ```bash
 cd frontend
 npm install
 ```
 
-## Step 5: Run Development Server
+## Step 6: Run Development Server
 
 ```bash
 npm run dev
 ```
 
-The app will be available at `http://localhost:3000` with Firebase initialized.
+The app will be available at `http://localhost:3000` with Firebase authentication enabled.
 
 ## Using Firebase in Your App
 
@@ -68,11 +80,16 @@ The app will be available at `http://localhost:3000` with Firebase initialized.
 import { auth } from './firebaseConfig'
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
 
-// Sign in
 const userCredential = await signInWithEmailAndPassword(auth, email, password)
-
-// Sign out
 await signOut(auth)
+```
+
+### Allowlist Check
+
+```javascript
+import { isApprovedFirebaseUser } from './firebaseAccess'
+
+const approved = await isApprovedFirebaseUser(currentUser)
 ```
 
 ### Firestore Database
@@ -81,11 +98,9 @@ await signOut(auth)
 import { db } from './firebaseConfig'
 import { collection, addDoc, getDocs } from 'firebase/firestore'
 
-// Add document
-await addDoc(collection(db, 'users'), { name: 'John' })
+await addDoc(collection(db, 'approvedUsers'), { email: 'user@example.com', enabled: true })
 
-// Get documents
-const querySnapshot = await getDocs(collection(db, 'users'))
+const querySnapshot = await getDocs(collection(db, 'approvedUsers'))
 ```
 
 ### Analytics
@@ -94,9 +109,11 @@ const querySnapshot = await getDocs(collection(db, 'users'))
 import { analytics } from './firebaseConfig'
 import { logEvent } from 'firebase/analytics'
 
-logEvent(analytics, 'screen_view', {
-  screen_name: 'Dashboard'
-})
+if (analytics) {
+  logEvent(analytics, 'screen_view', {
+    screen_name: 'Dashboard'
+  })
+}
 ```
 
 ## Production Deployment
@@ -117,9 +134,7 @@ logEvent(analytics, 'screen_view', {
 
 4. Deploy to Firebase Hosting:
    ```bash
-   npm install -g firebase-tools
-   firebase login
-   firebase deploy --only hosting
+   firebase deploy --only hosting --project dice-control-m
    ```
 
 ### Backend API URL
@@ -133,6 +148,9 @@ VITE_API_BASE_URL=https://your-api-domain.com
 
 ### Missing Firebase config
 If you see warnings about incomplete Firebase config, ensure all environment variables are set in `.env.local`
+
+### Access denied
+If Firebase sign-in works but the app blocks access, add the user email to the `approvedUsers` Firestore collection.
 
 ### Port conflicts
 - Frontend runs on port 3000

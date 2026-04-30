@@ -1,10 +1,8 @@
 # Frontend (React + Vite)
 
-This folder contains a minimal React frontend (Vite) that proxies `/api` to the Flask backend on port 5000.
+This app uses Firebase Authentication for access control and a React control panel for Telegram dice runs. Only approved Firebase users can sign in.
 
 Quick start:
-
-Install dependencies and run dev server:
 
 ```bash
 cd frontend
@@ -12,7 +10,14 @@ npm install
 npm run dev
 ```
 
-The dev server runs on port 3000 and forwards `/api` requests to the Flask app (http://localhost:5000).
+The dev server runs on port 3000. Firebase Auth handles access, and `/api` requests still go to the Flask backend on port 5000.
+
+## Firebase Access Model
+
+- Users sign in with Firebase email/password.
+- The app checks Firestore collection `approvedUsers` before allowing access.
+- Add users in Firebase Console by creating a document in `approvedUsers` with the document id set to the user email, or by adding a document with an `email` field.
+- If a user is not approved, the app signs them out automatically.
 
 ## Deploy to Firebase Hosting
 
@@ -30,20 +35,13 @@ VITE_API_BASE_URL=https://your-backend-domain.com
 
 ```bash
 cd frontend
-npm install
 npm run build
 ```
 
-3. Install Firebase CLI and deploy (from repository root):
+3. Deploy (from repository root):
 
 ```bash
-npm install -g firebase-tools
-firebase login
-firebase init hosting
-# Choose existing project
-# Public directory: frontend/dist
-# Single-page app rewrite: Yes
-firebase deploy --only hosting
+firebase deploy --only hosting --project dice-control-m
 ```
 
 The repository already includes a root `firebase.json` ready for hosting `frontend/dist`.

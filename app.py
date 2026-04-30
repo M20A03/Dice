@@ -18,6 +18,14 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 from dotenv import load_dotenv
 load_dotenv()
 
+ALLOWED_DICE = {
+    '🎲': 6,
+    '🎯': 6,
+    '🏀': 5,
+    '⚽': 5,
+    '🎳': 6,
+}
+
 # State management - per user sessions
 user_sessions = {}  # {session_id: {client, state, thread}}
 
@@ -73,7 +81,7 @@ async def initialize_client(user_id, api_id, api_hash, phone):
         add_log(user_id, f"❌ Failed to connect: {e}")
         return None
 
-async def dice_trick_async(user_id, client, chat_id, desired_number):
+async def dice_trick_async(user_id, client, chat_id, desired_number, dice_emoji='🎲'):
     """
     Sends dice messages repeatedly until it gets the desired number
     """
@@ -82,6 +90,7 @@ async def dice_trick_async(user_id, client, chat_id, desired_number):
     user_state['attempts'] = 0
     user_state['status'] = 'Running...'
     user_state['desired_number'] = desired_number
+    user_state['current_dice'] = dice_emoji
     
     try:
         while user_state['running']:
@@ -91,7 +100,7 @@ async def dice_trick_async(user_id, client, chat_id, desired_number):
                 # Send a dice message
                 dice_msg = await client.send_message(
                     chat_id, 
-                    file=InputMediaDice('🎲')
+                    file=InputMediaDice(dice_emoji)
                 )
                 
                 await asyncio.sleep(0.5)
@@ -219,7 +228,7 @@ def get_status():
     """Get current bot status"""
     user_id = get_user_id()
     user_state = get_user_state(user_id)
-    
+
     if not user_state['credentials']:
         return jsonify({'error': 'Not logged in'}), 401
     
@@ -237,16 +246,21 @@ def start_bot():
     if user_state['running']:
         return jsonify({'error': 'Bot already running'}), 400
     
-    data = request.json
-    desired_number = data.get('desired_number', 3)
-    
-    if desired_number < 1 or desired_number > 6:
-        return jsonify({'error': 'Number must be between 1 and 6'}), 400
+    data = request.json or {}
+    desired_number = int(data.get('desired_number', 3))
+    dice_emoji = data.get('dice_emoji', '🎲')
+    max_value = ALLOWED_DICE.get(dice_emoji)
+
+    if max_value is None:
+        return jsonify({'error': 'Unsupported dice type'}), 400
+
+    if desired_number < 1 or desired_number > max_value:
+        return jsonify({'error': f'Number must be between 1 and {max_value} for {dice_emoji}'}), 400
     
     user_state['attempts'] = 0
     user_state['logs'] = []
-    add_log(user_id, f"🎲 Starting bot... (Target: {desired_number})")
-    
+    add_log(user_id, f"🎲 Starting bot... (Target: {desired_number}, Dice: {dice_emoji})")
+
     # Initialize and start bot
     def init_and_run():
         loop = asyncio.new_event_loop()
@@ -273,7 +287,7 @@ def start_bot():
             add_log(user_id, f"✅ Connected to group: {chat.title if hasattr(chat, 'title') else 'Group'}")
             
             # Run bot
-            loop.run_until_complete(dice_trick_async(user_id, client, chat.id, desired_number))
+            loop.run_until_complete(dice_trick_async(user_id, client, chat.id, desired_number, dice_emoji))
         except Exception as e:
             add_log(user_id, f"❌ Error: {e}")
         finally:
@@ -285,6 +299,7 @@ def start_bot():
     thread = threading.Thread(target=init_and_run, daemon=True)
     thread.start()
     user_state['thread'] = thread
+    user_state['current_dice'] = dice_emoji
     
     return jsonify({'status': 'Bot started'})
 
