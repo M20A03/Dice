@@ -285,8 +285,30 @@ def verify_otp():
     if not user_state['credentials']:
         return jsonify({'error': 'Save Telegram credentials first'}), 401
 
-    data = request.json or {}
-    otp_code = str(data.get('otp_code', '')).strip()
+    # Try several ways to read the incoming OTP (JSON, form-data, query params)
+    data = {}
+    try:
+        json_data = request.get_json(silent=True)
+    except Exception:
+        json_data = None
+
+    if json_data:
+        data = json_data
+    elif request.form:
+        data = request.form.to_dict()
+    else:
+        # Fallback to values (includes query params and form)
+        data = request.values.to_dict()
+
+    otp_code = str(data.get('otp_code', '') or '').strip()
+
+    # Log raw body for debugging when OTP is missing
+    if not otp_code:
+        try:
+            raw = request.get_data(as_text=True)
+        except Exception:
+            raw = '<unavailable>'
+        add_log(user_id, f"🔍 verify_otp received empty otp; raw_body={raw} headers={dict(request.headers)}")
 
     if not otp_code:
         return jsonify({'error': 'OTP code is required'}), 400
