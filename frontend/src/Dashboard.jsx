@@ -103,11 +103,13 @@ export default function Dashboard({firebaseUser}){
     setError(null)
     setNotice(null)
 
+    const otpCode = form.otpCode.trim()
+
     try {
       await apiFetch('/api/verify-otp', {
         method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ otp_code: form.otpCode })
+        headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+        body: new URLSearchParams({ otp_code: otpCode })
       })
       setOtpSent(false)
       setForm(current => ({ ...current, otpCode: '' }))
@@ -278,6 +280,9 @@ export default function Dashboard({firebaseUser}){
                   value={form.otpCode}
                   onChange={event => setForm({...form, otpCode: event.target.value})}
                   placeholder="12345"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
                 />
               </label>
 
