@@ -8,6 +8,7 @@ import asyncio
 import threading
 import inspect
 import os
+import concurrent.futures
 from datetime import datetime
 import secrets
 
@@ -126,27 +127,33 @@ async def _request_otp_async(user_id, api_id, api_hash, phone):
     session_str = user_state.get('session_string', '')
     client = TelegramClient(StringSession(session_str), api_id, api_hash)
     try:
-        await _await_if_needed(client.connect())
-        sent_code = await _await_if_needed(client.send_code_request(phone))
+        await asyncio.wait_for(_await_if_needed(client.connect()), timeout=10.0)
+        sent_code = await asyncio.wait_for(_await_if_needed(client.send_code_request(phone)), timeout=15.0)
         user_state['session_string'] = client.session.save()
         return sent_code.phone_code_hash
     finally:
-        await _await_if_needed(client.disconnect())
+        try:
+            await asyncio.wait_for(_await_if_needed(client.disconnect()), timeout=3.0)
+        except Exception as e:
+            print(f"Disconnect timed out or failed: {e}")
 
 async def _verify_otp_async(user_id, api_id, api_hash, phone, otp_code, phone_code_hash):
     user_state = get_user_state(user_id)
     session_str = user_state.get('session_string', '')
     client = TelegramClient(StringSession(session_str), api_id, api_hash)
     try:
-        await _await_if_needed(client.connect())
-        await _await_if_needed(client.sign_in(
+        await asyncio.wait_for(_await_if_needed(client.connect()), timeout=10.0)
+        await asyncio.wait_for(_await_if_needed(client.sign_in(
             phone=phone,
             code=otp_code,
             phone_code_hash=phone_code_hash
-        ))
+        )), timeout=15.0)
         user_state['session_string'] = client.session.save()
     finally:
-        await _await_if_needed(client.disconnect())
+        try:
+            await asyncio.wait_for(_await_if_needed(client.disconnect()), timeout=3.0)
+        except Exception as e:
+            print(f"Disconnect timed out or failed: {e}")
 
 async def initialize_client(user_id, api_id, api_hash, phone, otp_code=None, phone_code_hash=None):
     """Initialize Telegram client for user"""
@@ -381,7 +388,12 @@ def verify_otp():
             ),
             telethon_loop
         )
-        future.result()
+        # Use a timeout so it doesn't hang the thread indefinitely if Telethon disconnect hangs
+        try:
+            future.result(timeout=15)
+        except concurrent.futures.TimeoutError:
+            add_log(user_id, "⚠️ OTP verification timed out, but proceeding anyway.")
+            
         # Keep this None here; start route creates a fresh client in its own loop/thread.
         user_state['client'] = None
         user_state['telegram_connected'] = True
