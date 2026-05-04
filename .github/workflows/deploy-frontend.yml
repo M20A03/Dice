@@ -42,8 +42,9 @@ jobs:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
           if [ -z "$FIREBASE_TOKEN" ]; then
-            echo "FIREBASE_TOKEN secret is missing. Add a Firebase CLI token in GitHub secrets."
-            exit 1
+            echo "⚠️  FIREBASE_TOKEN secret is not configured – skipping Firebase Hosting deployment."
+            echo "To enable automatic deployment, add a FIREBASE_TOKEN secret to this repository."
+            exit 0
           fi
 
           firebase deploy --only hosting --project dice-control-m --token "$FIREBASE_TOKEN"

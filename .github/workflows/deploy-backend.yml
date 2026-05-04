@@ -24,8 +24,9 @@ jobs:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "RENDER_DEPLOY_HOOK_URL secret is missing. Add your Render deploy hook URL in GitHub secrets."
-            exit 1
+            echo "⚠️  RENDER_DEPLOY_HOOK_URL secret is not configured – skipping Render deployment."
+            echo "To enable automatic deployment, add a RENDER_DEPLOY_HOOK_URL secret to this repository."
+            exit 0
           fi
 
           curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
