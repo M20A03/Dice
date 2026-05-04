@@ -108,8 +108,8 @@ export default function Dashboard({firebaseUser}){
     try {
       await apiFetch('/api/verify-otp', {
         method:'POST',
-        headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
-        body: new URLSearchParams({ otp_code: otpCode })
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ otp_code: otpCode })
       })
       setOtpSent(false)
       setForm(current => ({ ...current, otpCode: '' }))
