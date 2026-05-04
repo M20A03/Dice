@@ -3,6 +3,7 @@ from flask_cors import CORS
 from telethon import TelegramClient, errors
 from telethon.errors import SessionPasswordNeededError
 from telethon.tl.types import InputMediaDice
+from telethon.sessions import StringSession
 import asyncio
 import threading
 import inspect
@@ -19,7 +20,7 @@ FRONTEND_ORIGINS = os.getenv(
 ).split(',')
 
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
-app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('RENDER') == 'true' or os.getenv('FLASK_ENV') == 'production'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # Enable CORS for frontend communication
@@ -53,6 +54,7 @@ def get_user_state(user_id):
             'credentials': None,
             'telegram_connected': False,
             'phone_code_hash': None,
+            'session_string': '',
             'client': None,
             'thread': None
         }
@@ -88,16 +90,21 @@ async def _await_if_needed(result):
     return result
 
 async def _request_otp_async(user_id, api_id, api_hash, phone):
-    client = TelegramClient(f'dice_session_{user_id}', api_id, api_hash)
+    user_state = get_user_state(user_id)
+    session_str = user_state.get('session_string', '')
+    client = TelegramClient(StringSession(session_str), api_id, api_hash)
     try:
         await _await_if_needed(client.connect())
         sent_code = await _await_if_needed(client.send_code_request(phone))
+        user_state['session_string'] = client.session.save()
         return sent_code.phone_code_hash
     finally:
         await _await_if_needed(client.disconnect())
 
 async def _verify_otp_async(user_id, api_id, api_hash, phone, otp_code, phone_code_hash):
-    client = TelegramClient(f'dice_session_{user_id}', api_id, api_hash)
+    user_state = get_user_state(user_id)
+    session_str = user_state.get('session_string', '')
+    client = TelegramClient(StringSession(session_str), api_id, api_hash)
     try:
         await _await_if_needed(client.connect())
         await _await_if_needed(client.sign_in(
@@ -105,6 +112,7 @@ async def _verify_otp_async(user_id, api_id, api_hash, phone, otp_code, phone_co
             code=otp_code,
             phone_code_hash=phone_code_hash
         ))
+        user_state['session_string'] = client.session.save()
     finally:
         await _await_if_needed(client.disconnect())
 
@@ -204,6 +212,13 @@ def run_bot_thread(user_id, client, chat_id, desired_number):
     finally:
         loop.close()
 
+
+def create_telegram_client(user_id, api_id, api_hash):
+    """Create a fresh Telegram client bound to the current thread's event loop."""
+    user_state = get_user_state(user_id)
+    session_str = user_state.get('session_string', '')
+    return TelegramClient(StringSession(session_str), api_id, api_hash)
+
 # ============================================
 # Flask Routes
 # ============================================
@@ -218,6 +233,12 @@ def index():
         'version': '1.0',
         'message': 'Frontend is served separately. Use /api/* endpoints.'
     })
+
+
+@app.route('/healthz')
+def healthz():
+    """Simple health check for Render and other hosting platforms."""
+    return jsonify({'status': 'ok'})
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -414,19 +435,12 @@ def start_bot():
         
         try:
             creds = user_state['credentials']
-            client = user_state.get('client')
-
-            if not client:
-                client = TelegramClient(f'dice_session_{user_id}', creds['api_id'], creds['api_hash'])
-                loop.run_until_complete(client.connect())
-                if not loop.run_until_complete(client.is_user_authorized()):
-                    add_log(user_id, "❌ Telegram session is not authorized. Verify the OTP again.")
-                    return
-                user_state['client'] = client
-            
-            if not client:
-                add_log(user_id, "❌ Failed to connect to Telegram")
+            client = create_telegram_client(user_id, creds['api_id'], creds['api_hash'])
+            loop.run_until_complete(client.connect())
+            if not loop.run_until_complete(client.is_user_authorized()):
+                add_log(user_id, "❌ Telegram session is not authorized. Verify the OTP again.")
                 return
+            user_state['client'] = client
             
             # Get chat entity
             chat = loop.run_until_complete(client.get_entity(creds['group_link']))
@@ -437,6 +451,14 @@ def start_bot():
         except Exception as e:
             add_log(user_id, f"❌ Error: {e}")
         finally:
+            try:
+                if user_state.get('client'):
+                    disconnect_result = user_state['client'].disconnect()
+                    if inspect.isawaitable(disconnect_result):
+                        loop.run_until_complete(disconnect_result)
+            except Exception:
+                pass
+            user_state['client'] = None
             try:
                 loop.close()
             except:
@@ -459,6 +481,14 @@ def stop_bot():
         return jsonify({'error': 'Not logged in'}), 401
     
     user_state['running'] = False
+    if user_state.get('client'):
+        try:
+            disconnect_result = user_state['client'].disconnect()
+            if inspect.isawaitable(disconnect_result):
+                asyncio.run(disconnect_result)
+        except Exception:
+            pass
+        user_state['client'] = None
     add_log(user_id, "⏹️ Bot stopped by user")
     return jsonify({'status': 'Bot stopped'})
 
