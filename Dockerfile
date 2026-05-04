@@ -13,5 +13,5 @@ COPY app.py dice_trick.py ./
 EXPOSE 8080
 
 # Run with gunicorn, bind to the PORT provided by the platform
-ENV PORT 8080
-CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --timeout 300 app:app
+ENV PORT=8080
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --timeout 300 app:app"]

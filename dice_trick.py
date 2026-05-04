@@ -15,8 +15,8 @@ import sys
 # ============================================
 
 API_ID = 38456971                    # Get from my.telegram.org
-API_HASH = '325e7561523444f420aab42f81b46fbf'  # Get from my.telegram.org
-PHONE = '+919835139865'              # Your phone with country code
+API_HASH = '325e7561523444f420aab42f81b46f'  # Get from my.telegram.org
+PHONE = '+919'              # Your phone with country code
 GROUP_LINK = 'https://t.me/+TlZAt5iI_n01NTM1'  # Your group link
 DESIRED_NUMBER = 6                   # What number you want (1-6)
 

@@ -1,10 +1,10 @@
 services:
   - type: web
     name: telegram-dice-api
-    env: python
+    env: docker
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 4 -b 0.0.0.0:$PORT app:app
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.3
