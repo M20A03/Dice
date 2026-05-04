@@ -14,6 +14,15 @@ import secrets
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # For session management
 
+# --- Global Asyncio Loop for Telethon ---
+telethon_loop = asyncio.new_event_loop()
+def start_telethon_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+threading.Thread(target=start_telethon_loop, args=(telethon_loop,), daemon=True).start()
+# ----------------------------------------
+
 FRONTEND_ORIGINS = os.getenv(
     'FRONTEND_ORIGINS',
     'https://dice-control-m.web.app,https://dice-control-m.firebaseapp.com,http://localhost:5173'
@@ -289,12 +298,11 @@ def login():
     user_state['phone_code_hash'] = None
 
     try:
-        user_state['phone_code_hash'] = asyncio.run(_request_otp_async(
-            user_id,
-            api_id,
-            api_hash,
-            phone
-        ))
+        future = asyncio.run_coroutine_threadsafe(
+            _request_otp_async(user_id, api_id, api_hash, phone),
+            telethon_loop
+        )
+        user_state['phone_code_hash'] = future.result()
         add_log(user_id, "📩 OTP sent to your Telegram number")
     except SessionPasswordNeededError:
         user_state['phone_code_hash'] = None
@@ -352,14 +360,18 @@ def verify_otp():
         return jsonify({'error': 'OTP was not requested yet. Save credentials again to request a new code.'}), 400
 
     try:
-        asyncio.run(_verify_otp_async(
-            user_id,
-            creds['api_id'],
-            creds['api_hash'],
-            creds['phone'],
-            otp_code,
-            user_state['phone_code_hash']
-        ))
+        future = asyncio.run_coroutine_threadsafe(
+            _verify_otp_async(
+                user_id,
+                creds['api_id'],
+                creds['api_hash'],
+                creds['phone'],
+                otp_code,
+                user_state['phone_code_hash']
+            ),
+            telethon_loop
+        )
+        future.result()
         # Keep this None here; start route creates a fresh client in its own loop/thread.
         user_state['client'] = None
         user_state['telegram_connected'] = True
@@ -384,7 +396,7 @@ def logout():
             try:
                 disconnect_result = user_state['client'].disconnect()
                 if inspect.isawaitable(disconnect_result):
-                    asyncio.run(disconnect_result)
+                    asyncio.run_coroutine_threadsafe(disconnect_result, telethon_loop)
             except:
                 pass
         # Clear credentials
@@ -498,7 +510,7 @@ def stop_bot():
         try:
             disconnect_result = user_state['client'].disconnect()
             if inspect.isawaitable(disconnect_result):
-                asyncio.run(disconnect_result)
+                asyncio.run_coroutine_threadsafe(disconnect_result, telethon_loop)
         except Exception:
             pass
         user_state['client'] = None
