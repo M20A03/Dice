@@ -16,11 +16,21 @@ app.secret_key = secrets.token_hex(32)  # For session management
 
 # --- Global Asyncio Loop for Telethon ---
 telethon_loop = asyncio.new_event_loop()
+telethon_thread = None
+
 def start_telethon_loop(loop):
     asyncio.set_event_loop(loop)
     loop.run_forever()
 
-threading.Thread(target=start_telethon_loop, args=(telethon_loop,), daemon=True).start()
+def ensure_telethon_thread():
+    global telethon_thread
+    if telethon_thread is None or not telethon_thread.is_alive():
+        telethon_thread = threading.Thread(target=start_telethon_loop, args=(telethon_loop,), daemon=True)
+        telethon_thread.start()
+
+@app.before_request
+def setup_background_thread():
+    ensure_telethon_thread()
 # ----------------------------------------
 
 FRONTEND_ORIGINS = os.getenv(
