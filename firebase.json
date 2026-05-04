@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "dice-control-m",
     "public": "frontend/dist",
     "ignore": [
       "firebase.json",

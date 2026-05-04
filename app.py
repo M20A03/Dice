@@ -27,7 +27,9 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 CORS(
     app,
     resources={r"/api/*": {"origins": [origin.strip() for origin in FRONTEND_ORIGINS]}},
-    supports_credentials=True
+    supports_credentials=True,
+    allow_headers=['Content-Type', 'X-User-ID'],
+    expose_headers=['X-User-ID']
 )
 
 # Optional: Load from .env if available (for deployment servers)
@@ -67,7 +69,18 @@ client = None
 # Helper Functions
 # ============================================
 def get_user_id():
-    """Get current user ID from session"""
+    """Get current user ID from session or X-User-ID header.
+
+    Modern browsers block cross-origin cookies (SameSite), so the frontend
+    can send the user_id it received from /api/login via the X-User-ID header
+    as a reliable fallback.
+    """
+    # Prefer header-based ID (works reliably across origins)
+    header_id = request.headers.get('X-User-ID', '').strip()
+    if header_id and header_id in user_sessions:
+        session['user_id'] = header_id
+        return header_id
+
     if 'user_id' not in session:
         session['user_id'] = secrets.token_hex(8)
     return session['user_id']
